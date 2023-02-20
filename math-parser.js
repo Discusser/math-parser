@@ -44,6 +44,51 @@ class Operand {
         this.value = value;
     }
 }
+// Represents a list of tokens in Reverse Polish notation
+class CompiledExpression {
+    tokens;
+    constants;
+    userFunctions;
+    constructor(tokens, constants, userFunctions) {
+        this.tokens = tokens;
+        this.constants = constants;
+        this.userFunctions = userFunctions;
+    }
+    calculate() {
+        const expression = this.tokens;
+        while (true) {
+            let foundOperator = false;
+            for (let i = 0; i < expression.length; i++) {
+                if (expression[i] instanceof Operator) {
+                    const operator = expression[i];
+                    foundOperator = true;
+                    try {
+                        const result = operator.apply(parseFloat(expression[i - 2].value), parseFloat(expression[i - 1].value));
+                        expression.splice(i - 2, 3, new Operand(numToStr(result)));
+                    }
+                    catch (e) {
+                        throw new Error("Invalid expression! There aren't enough operands");
+                    }
+                    break;
+                }
+                else if (expression[i] instanceof TFunction) {
+                    const func = expression[i];
+                    foundOperator = true;
+                    const args = expression.slice(i - func.onApply.length, i).map(value => parseFloat(value.value));
+                    const result = func.apply(args);
+                    expression.splice(i - func.onApply.length, func.onApply.length + 1, new Operand(numToStr(result)));
+                    break;
+                }
+            }
+            if (!foundOperator)
+                break;
+        }
+        if (expression.length > 1) {
+            throw new Error("Invalid expression! There are too many operands");
+        }
+        return parseFloat(expression[0].value);
+    }
+}
 const parentheses = new Map([
     ["(", new Parenthesis("(")],
     [")", new Parenthesis(")")]
@@ -74,6 +119,26 @@ const functions = new Map([]);
             functions.set(keys[i], new TFunction(keys[i], value));
     }
 }
+function numToStr(num) {
+    let str = num.toString();
+    if (Number.isInteger(num)) {
+        return str;
+    }
+    else {
+        if (str.includes("e") || str.includes("E")) {
+            try {
+                return num.toFixed(Math.min(str.match(/(?<=.)\d+/)[0].length +
+                    parseInt(str.match(/\d+$/)[0], 100)));
+            }
+            catch (e) {
+                throw new Error("Invalid number format. This should be impossible!");
+            }
+        }
+        else {
+            return num.toFixed(str.slice(str.indexOf(".") + 1).length);
+        }
+    }
+}
 function isNumber(str) {
     return /^[-+]?\d+\.*\d*$/.test(str);
 }
@@ -88,12 +153,45 @@ function isOperator(str) {
     return str.length === 1 && operators.has(str);
 }
 const mathParser = {
+    mapStringToFunction(constants, userFunctions) {
+        let userFunctionsCopy = new Map();
+        userFunctions.forEach((value, key) => {
+            if (typeof (value) === "string") {
+                userFunctionsCopy.set(key, this.toFunction(key, value, constants, userFunctions));
+            }
+            else {
+                userFunctionsCopy.set(key, value);
+            }
+        });
+        return userFunctionsCopy;
+    },
+    // (-1*(x+(3-y)/(y^2-(b*c)+7)-150))
+    // Finds where a certain parenthesis ends
+    // searchAfter is included
+    lastIndexOfGroup(str, searchAfter) {
+        let count = null;
+        for (let i = searchAfter; i < str.length; i++) {
+            if (str[i] === "(")
+                count++;
+            else if (str[i] === ")")
+                count--;
+            if (count === 0)
+                return i;
+        }
+        return -1;
+    },
+    tokensToStr(tokens) {
+        let str = "";
+        tokens.forEach(value => str += value.value);
+        return str;
+    },
     toTokenArray(expression, constants = new Map(), userFunctions = new Map()) {
         let expressionCopy = expression
             .replace(/\s/g, "")
             .replace(/(?<=\d)([a-zA-Z]'*)/g, "*$1")
             + " ";
         let output = [];
+        userFunctions = this.mapStringToFunction(constants, userFunctions);
         while (expressionCopy.length > 0) {
             let previous = "";
             for (let i = 1; i <= expressionCopy.length; i++) {
@@ -104,12 +202,11 @@ const mathParser = {
                 }
                 else if (isVariable(previous) && !isVariable(slice)) {
                     if (slice.endsWith("(")) { // check if it's a function
-                        if (functions.has(previous)) { // @ts-ignore
+                        if (functions.has(previous)) {
                             output.push(functions.get(previous));
                             break;
                         }
                         else if (userFunctions.has(previous)) {
-                            // @ts-ignore
                             let func = userFunctions.get(previous);
                             if (typeof (func) === "string") {
                                 func = this.toFunction(previous, func, constants, userFunctions);
@@ -121,12 +218,17 @@ const mathParser = {
                             throw new Error("Found invalid function " + previous);
                         }
                     }
+                    // else if (output.at(-1) instanceof Operand && previous === "e") {
+                    //     // Check if it's scientific format (cmon javascript why)
+                    //     output.push(operators.get("*"), new Operand("10"), operators.get("^"));
+                    //
+                    //     break;
+                    // }
                     else if (constants.has(previous)) {
-                        // @ts-ignore
-                        let constant = constants.get(previous);
-                        const constantsCopy = constants;
+                        const constant = constants.get(previous);
+                        const constantsCopy = new Map(constants);
                         constantsCopy.delete(constant);
-                        output.push(...this.toTokenArray("(" + constant + ")", constantsCopy));
+                        output.push(...this.toTokenArray("(" + constant + ")", constantsCopy, userFunctions));
                         break;
                     }
                     else {
@@ -134,20 +236,11 @@ const mathParser = {
                     }
                 }
                 else if (isOperator(previous) && !isOperator(slice)) {
-                    if (output.length === 0 && (previous[0] === "+" || previous[0] === "-")) {
-                        previous = slice;
-                    }
-                    else {
-                        const operator = operators.get(previous);
-                        if (operator !== undefined)
-                            output.push(operator);
-                        break;
-                    }
+                    output.push(operators.get(previous));
+                    break;
                 }
                 else if (isParentheses(slice)) {
-                    const parenthesis = parentheses.get(slice);
-                    if (parenthesis !== undefined)
-                        output.push(parenthesis);
+                    output.push(parentheses.get(slice));
                     previous = slice;
                     break;
                 }
@@ -160,19 +253,42 @@ const mathParser = {
             }
             expressionCopy = expressionCopy.replace(previous, "");
         }
-        let fromIndex = 0;
-        while (true) {
-            // @ts-ignore
-            let lastIndex = output.lastIndexOf(operators.get("-"));
-            if (lastIndex === fromIndex || lastIndex === -1)
-                break;
-            // @ts-ignore
-            let index = output.indexOf(operators.get("-"), fromIndex);
-            if (index >= 1 && !(output[index - 1] instanceof Number)) {
-                output.splice(index, 2, new Operand(output[index].value + output[index + 1].value));
+        output.forEach((value, index) => {
+            if (value.value === "+") {
+                if (index === 0)
+                    output.splice(0, 1);
+                else if (index - 1 >= 0) {
+                    if (output[index - 1].value === "-" || output[index + 1].value === "-") {
+                        output.splice(index, 1);
+                    }
+                }
             }
-            fromIndex = index;
-        }
+            else if (value.value === "-") {
+                if ((index - 1 >= 0 && output[index - 1].value === "-") ||
+                    (output[index + 1].value === "-")) {
+                    return;
+                }
+                if (index === 0 && output[index + 1] instanceof Operand) {
+                    output.splice(index, 2, new Operand("-" + output[index + 1].value));
+                }
+                else if (output[index - 1] instanceof Operand) {
+                }
+                else if (output[index - 1].value === ")") {
+                    output.splice(index, 1, operators.get("-"), new Operand("1"), operators.get("*"));
+                    let lastIndexOfGroup = this.lastIndexOfGroup(this.tokensToStr(output), index + 3);
+                    output.splice(lastIndexOfGroup === -1 ? index + 1 : lastIndexOfGroup, 0);
+                }
+                else if (output[index - 1].value === "(") {
+                    output.splice(index, 1, new Operand("-1"), operators.get("*"), parentheses.get("("));
+                    output.splice(index + 3 + 1, 0, parentheses.get(")"));
+                }
+                else {
+                    output.splice(index, 1, parentheses.get("("), new Operand("-1"), operators.get("*"));
+                    let lastIndexOfGroup = this.lastIndexOfGroup(this.tokensToStr(output.slice(1)), index + 3);
+                    output.splice(lastIndexOfGroup === -1 ? index + 1 : lastIndexOfGroup, 0, parentheses.get(")"));
+                }
+            }
+        });
         return output;
     },
     // https://en.wikipedia.org/wiki/Shunting_yard_algorithm
@@ -191,13 +307,11 @@ const mathParser = {
             }
             else if (tokenArray[0] instanceof Operator) {
                 while (true) {
-                    // @ts-ignore
                     const top = operatorStack.at(-1);
                     if (top instanceof Operator
                         && (top.precedence > tokenArray[0].precedence
                             || (top.precedence === tokenArray[0].precedence
                                 && tokenArray[0].associativity === Associativity.LEFT))) {
-                        // @ts-ignore
                         postfixOutput.push(operatorStack.pop());
                     }
                     else {
@@ -210,20 +324,16 @@ const mathParser = {
                 operatorStack.push(tokenArray[0]);
             }
             else if (tokenArray[0].value === ")") {
-                // @ts-ignore
                 while (operatorStack.at(-1).value !== "(") {
                     if (operatorStack.length === 0) {
                         throw new Error("Mismatched parentheses! This should be impossible.");
                     }
-                    // @ts-ignore
                     postfixOutput.push(operatorStack.pop());
                 }
-                // @ts-ignore
                 if (operatorStack.at(-1).value === "(") {
                     operatorStack.pop();
                 }
                 if (operatorStack.at(-1) instanceof TFunction) {
-                    // @ts-ignore
                     postfixOutput.push(operatorStack.pop());
                 }
             }
@@ -231,69 +341,28 @@ const mathParser = {
         }
         while (operatorStack.length > 0) {
             if (!(operatorStack.at(-1) instanceof Parenthesis)) {
-                // @ts-ignore
                 postfixOutput.push(operatorStack.pop());
             }
             else {
                 throw new Error("Mismatched parentheses! This should be impossible.");
             }
         }
-        return postfixOutput;
+        return new CompiledExpression(postfixOutput, constants, userFunctions);
     },
     // Helper method to convert a string into a js Function
     toFunction(name, expression, constants = new Map(), userFunctions = new Map()) {
         return new TFunction(name, (x) => {
+            const constantsCopy = new Map(constants);
             let variable = "x";
-            while (constants.has(variable)) {
+            while (constantsCopy.has(variable)) {
                 variable += "'";
             }
-            constants.set(variable, x.toString());
-            return this.calculate(expression.replace(/x/g, variable), constants, userFunctions);
+            constantsCopy.set(variable, numToStr(x));
+            return this.compile(expression.replace(/x/g, variable), constantsCopy, userFunctions).calculate();
         });
     },
-    calculate(expression, constants = new Map(), userFunctions = new Map()) {
-        let postfix = this.toPostfixNotation(expression, constants, userFunctions);
-        while (true) {
-            let foundOperator = false;
-            for (let i = 0; i < postfix.length; i++) {
-                if (postfix[i] instanceof Operator) {
-                    const operator = postfix[i];
-                    foundOperator = true;
-                    try {
-                        const result = operator.apply(parseFloat(postfix[i - 2].value), parseFloat(postfix[i - 1].value));
-                        postfix.splice(i - 2, 3, new Operand(result.toString()));
-                    }
-                    catch (e) {
-                        throw new Error("Invalid expression! There aren't enough operands");
-                    }
-                    break;
-                }
-                else if (postfix[i] instanceof TFunction) {
-                    const func = postfix[i];
-                    foundOperator = true;
-                    const args = postfix.slice(i - func.onApply.length, i).map(value => parseFloat(value.value));
-                    const result = func.apply(args);
-                    postfix.splice(i - func.onApply.length, func.onApply.length + 1, new Operand(result.toString()));
-                    break;
-                }
-            }
-            if (!foundOperator)
-                break;
-        }
-        if (postfix.length > 1) {
-            throw new Error("Invalid expression! There are too many operands");
-        }
-        return parseFloat(postfix[0].value);
-    }
+    compile(expression, constants = new Map(), userFunctions = new Map()) {
+        return this.toPostfixNotation(expression, constants, this.mapStringToFunction(constants, userFunctions));
+    },
 };
 exports.mathParser = mathParser;
-// const userFunctions = new Map([
-//     ["f", "2x+3"],
-//     ["g", "2*f(x)"]
-// ])
-// const constants = new Map([
-//     ["x", "6+5"],
-//     ["y", "2x+3"],
-//     ["z", "5x-2y"]
-// ])
-console.log(mathParser.calculate("sqrt(-1)"));
