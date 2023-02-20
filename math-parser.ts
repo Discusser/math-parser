@@ -81,7 +81,7 @@ class CompiledExpression {
                     try {
                         const result = operator.apply(parseFloat(expression[i - 2].value), parseFloat(expression[i - 1].value));
 
-                        expression.splice(i - 2, 3, new Operand(numToStr(result)));
+                        expression.splice(i - 2, 3, new Operand(mathParser.numToStr(result)));
                     } catch (e) {
                         throw new Error("Invalid expression! There aren't enough operands")
                     }
@@ -95,7 +95,7 @@ class CompiledExpression {
                     const result: number = func.apply(args)
 
                     expression.splice(i - func.onApply.length, func.onApply.length + 1,
-                        new Operand(numToStr(result)))
+                        new Operand(mathParser.numToStr(result)))
 
                     break;
                 }
@@ -145,26 +145,6 @@ const functions: Map<string, TFunction> = new Map([]);
     }
 }
 
-function numToStr(num: number): string {
-    let str = num.toString();
-    if (Number.isInteger(num)) {
-        return str;
-    } else {
-        if (str.includes("e") || str.includes("E")) {
-            try {
-                return num.toFixed(
-                    Math.min(str.match(/(?<=.)\d+/)[0].length +
-                    parseInt(str.match(/\d+$/)[0], 100))
-                );
-            } catch (e) {
-                throw new Error("Invalid number format. This should be impossible!")
-            }
-        } else {
-            return num.toFixed(str.slice(str.indexOf(".") + 1).length)
-        }
-    }
-}
-
 function isNumber(str: string) {
     return /^[-+]?\d+\.*\d*$/.test(str);
 }
@@ -183,6 +163,26 @@ function isOperator(str: string) {
 }
 
 const mathParser = {
+    numToStr(num: number): string {
+        let str = num.toString();
+        if (Number.isInteger(num)) {
+            return str;
+        } else {
+            if (str.includes("e") || str.includes("E")) {
+                try {
+                    return num.toFixed(
+                        Math.min(str.match(/(?<=.)\d+/)[0].length +
+                            parseInt(str.match(/\d+$/)[0], 100))
+                    );
+                } catch (e) {
+                    throw new Error("Invalid number format. This should be impossible!")
+                }
+            } else {
+                return num.toFixed(str.slice(str.indexOf(".") + 1).length)
+            }
+        }
+    },
+
     mapStringToFunction(constants: Map<string, string>, userFunctions: Map<string, TFunction | string>): Map<string, TFunction> {
         let userFunctionsCopy: Map<string, TFunction> = new Map();
 
@@ -257,12 +257,6 @@ const mathParser = {
                             throw new Error("Found invalid function " + previous);
                         }
                     }
-                    // else if (output.at(-1) instanceof Operand && previous === "e") {
-                    //     // Check if it's scientific format (cmon javascript why)
-                    //     output.push(operators.get("*"), new Operand("10"), operators.get("^"));
-                    //
-                    //     break;
-                    // }
                     else if (constants.has(previous)) {
                         const constant: string = constants.get(previous);
                         const constantsCopy = new Map(constants);
@@ -407,7 +401,7 @@ const mathParser = {
                 variable += "'";
             }
 
-            constantsCopy.set(variable, numToStr(x));
+            constantsCopy.set(variable, this.numToStr(x));
 
             return this.compile(expression.replace(/x/g, variable), constantsCopy, userFunctions).calculate();
         });
