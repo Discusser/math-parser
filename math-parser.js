@@ -1,6 +1,3 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.mathParser = void 0;
 var Associativity;
 (function (Associativity) {
     Associativity[Associativity["LEFT"] = 0] = "LEFT";
@@ -365,4 +362,29 @@ const mathParser = {
         return this.toPostfixNotation(expression, constants, this.mapStringToFunction(constants, userFunctions));
     },
 };
-exports.mathParser = mathParser;
+// Benchmark
+// Reference times:
+//  ( 3x^2+2x-4 ) x 1001 => ~70ms
+// {
+//     const userFunctions = new Map([
+//         ["f", "3x^2+2x-4"]
+//     ])
+//     const constants = new Map([
+//         ["x", "-16"]
+//     ]);
+//
+//     let expression = mathParser.compile("f(x)", constants, userFunctions);
+//
+//     const start = new Date();
+//
+//     for (let i = 0; i < 1001; i++) {
+//         expression.calculate()
+//
+//         constants.set("x", numToStr((parseFloat(constants.get("x")) + 0.032)));
+//         expression = mathParser.compile("f(x)", constants, userFunctions);
+//     }
+//
+//     const end = new Date();
+//     console.log(end.getTime() - start.getTime());
+// }
+export default mathParser;

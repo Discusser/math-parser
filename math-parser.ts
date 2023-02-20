@@ -445,4 +445,4 @@ const mathParser = {
 //     console.log(end.getTime() - start.getTime());
 // }
 
-export { mathParser }
+export default mathParser
