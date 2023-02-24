@@ -70,6 +70,8 @@ class CompiledExpression {
                     foundOperator = true;
                     try {
                         const result = operator.apply(parseFloat(expression[i - 2].value), parseFloat(expression[i - 1].value));
+                        if (Number.isNaN(result))
+                            return NaN;
                         expression.splice(i - 2, 3, new Operand(mathParser.numToStr(result)));
                     }
                     catch (e) {
@@ -82,6 +84,8 @@ class CompiledExpression {
                     foundOperator = true;
                     const args = expression.slice(i - func.onApply.length, i).map(value => parseFloat(value.value));
                     const result = func.apply(args);
+                    if (Number.isNaN(result))
+                        return NaN;
                     expression.splice(i - func.onApply.length, func.onApply.length + 1, new Operand(mathParser.numToStr(result)));
                     break;
                 }
@@ -149,7 +153,7 @@ function isVariable(str) {
     if (str === undefined || str === null) {
         throw new Error("Input string cannot be undefined!");
     }
-    return /^[a-zA-Z]+'*$/.test(str);
+    return /^[-+]?[a-zA-Z]+'*$/.test(str);
 }
 function isParentheses(str) {
     if (str === undefined || str === null) {
@@ -288,17 +292,22 @@ const mathParser = {
                     (output[index + 1].value === "-")) {
                     return;
                 }
-                if (index === 0 && output[index + 1] instanceof Operand) {
-                    output.splice(index, 2, new Operand("-" + output[index + 1].value));
+                if (index === 0 && output[index + 1] instanceof Operand) { // beginning followed by operand
+                    if (isVariable(output[index + 1].value)) {
+                        output.splice(index, 1, new Operand("-1"), operators.get("*"));
+                    }
+                    else {
+                        output.splice(index, 2, new Operand("-" + output[index + 1].value));
+                    }
                 }
-                else if (output[index - 1] instanceof Operand) {
+                else if (output[index - 1] instanceof Operand) { // preceded by operand
                 }
-                else if (output[index - 1].value === ")") {
+                else if (output[index - 1].value === ")") { // preceded by closing parenthesis
                     output.splice(index, 1, operators.get("-"), new Operand("1"), operators.get("*"));
                     let lastIndexOfGroup = this.lastIndexOfGroup(this.tokensToStr(output), index + 3);
                     output.splice(lastIndexOfGroup === -1 ? index + 1 : lastIndexOfGroup, 0);
                 }
-                else if (output[index - 1].value === "(") {
+                else if (output[index - 1].value === "(") { // preceded by opening parenthesis
                     output.splice(index, 1, new Operand("-1"), operators.get("*"), parentheses.get("("));
                     output.splice(index + 3 + 1, 0, parentheses.get(")"));
                 }
